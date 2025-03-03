@@ -12,8 +12,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Replace "*" with your Webflow URL later for security
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
 # Define API Key
@@ -51,9 +51,9 @@ def scrape_google_maps(search_queries):
                 place.get("userRatingCount", ""),
                 place.get("internationalPhoneNumber", ""),
                 place.get("websiteUri", ""),
-                ", ".join(place.get("currentOpeningHours", {}).get("weekdayDescriptions", [])),
+                ", ".join(place.get("currentOpeningHours", {}).get("weekdayDescriptions", [])),  
                 place.get("priceLevel", ""),
-                ", ".join(place.get("types", [])),
+                ", ".join(place.get("types", [])),  
                 place.get("location", {}).get("latitude", ""),
                 place.get("location", {}).get("longitude", "")
             ])
