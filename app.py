@@ -4,6 +4,13 @@ from fastapi.responses import FileResponse
 import requests
 import csv
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Fetch API Key securely
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
 app = FastAPI()
 
@@ -15,9 +22,6 @@ app.add_middleware(
     allow_methods=["*"],  
     allow_headers=["*"],  
 )
-
-# Define API Key
-GOOGLE_PLACES_API_KEY = "AIzaSyCf3hGwBpAm_90mEiCFc_4F9Levblv-gaw"
 
 # Global variable to track progress
 scrape_progress = {"progress": 0}
