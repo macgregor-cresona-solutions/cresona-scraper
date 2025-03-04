@@ -1,3 +1,5 @@
 .env
 firebase_admin_sdk.json # Adds it to .gitignore to prevent future commits
 firebase_admin_sdk.json # Adds it to .gitignore to prevent future commits
+firebase_admin_sdk.json # Add the file to Git ignore list
+cresona-scraper-firebase-adminsdk-fbsvc-ea2db395f6.json # Add the file to Git ignore list
