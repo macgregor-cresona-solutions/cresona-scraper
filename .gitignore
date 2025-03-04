@@ -1,1 +1,2 @@
 .env
+firebase_admin_sdk.json # Adds it to .gitignore to prevent future commits
