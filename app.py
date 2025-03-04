@@ -1,9 +1,9 @@
+import os
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
 import csv
-import os
 
 app = FastAPI()
 
@@ -16,8 +16,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Define your Google Places API Key
-GOOGLE_PLACES_API_KEY = "YOUR_GOOGLE_PLACES_API_KEY"
+# ✅ Load API Key from Environment Variable
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
 # ✅ Function to scrape Google Maps data with all advanced fields
 def scrape_google_maps(search_queries):
