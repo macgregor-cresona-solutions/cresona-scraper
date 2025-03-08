@@ -1,102 +1,100 @@
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query
 import requests
 import csv
 import os
 from dotenv import load_dotenv
+from fastapi.responses import FileResponse
+import tempfile
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Fetch API Key securely
-GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
-
+# Initialize FastAPI app
 app = FastAPI()
 
-# Enable CORS to allow Webflow requests
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with your Webflow URL later for security
-    allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
-)
+# Get API Key from environment variable
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
-# Global variable to track progress
-scrape_progress = {"progress": 0}
+# Base URL for Google Places API
+GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 
-# Function to scrape Google Maps data with progress tracking
-def scrape_google_maps(search_queries):
-    global scrape_progress
-    results = []
-    total_queries = len(search_queries)
-    
-    url = "https://places.googleapis.com/v1/places:searchText"
+# Default fields to pull if the user does not select any
+DEFAULT_FIELDS = [
+    "name", "formatted_address", "place_id", "website", "formatted_phone_number",
+    "international_phone_number", "opening_hours", "secondary_opening_hours",
+    "regularSecondaryOpeningHours", "rating", "user_ratings_total", "reviews",
+    "price_level", "business_status", "permanently_closed", "geometry",
+    "photo", "editorial_summary", "paymentOptions", "parkingOptions",
+    "delivery", "takeout", "dine_in", "curbside_pickup", "reservable",
+    "servesBreakfast", "servesBrunch", "servesLunch", "servesDinner",
+    "servesDessert", "servesCocktails", "servesCoffee", "servesBeer",
+    "servesWine", "servesVegetarianFood", "goodForChildren", "goodForGroups",
+    "goodForWatchingSports", "outdoorSeating", "liveMusic", "menuForChildren",
+    "allowsDogs", "restroom", "wheelchairAccessibleEntrance",
+    "wheelchairAccessibleParking", "wheelchairAccessibleRestroom",
+    "wheelchairAccessibleSeating", "fuelOptions", "evChargeOptions",
+    "subDestinations", "primaryType", "primaryTypeDisplayName", "type",
+    "shortFormattedAddress", "vicinity", "icon", "icon_mask_base_uri",
+    "icon_background_color", "url", "plus_code", "adr_address",
+    "address_component"
+]
+
+# Temporary file for CSV storage
+TEMP_CSV_FILE = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+
+@app.get("/start_scraping/")
+async def start_scraping(
+    search_query: str = Query(..., description="Search query (e.g., 'Landscaping Companies in 99507')"),
+    selected_fields: str = Query("", description="Comma-separated list of selected fields")
+):
+    """
+    Search Google Places API and return results as a CSV file.
+    """
+    # If no fields were selected, use all default fields
+    selected_fields_list = selected_fields.split(",") if selected_fields else DEFAULT_FIELDS
+
+    # Format field mask for Google API
+    field_mask = ",".join(selected_fields_list)
+
+    # Prepare the request payload
+    payload = {
+        "textQuery": search_query,
+    }
+
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-        "X-Goog-FieldMask": "places.displayName.text,places.formattedAddress,places.rating,places.userRatingCount,places.internationalPhoneNumber,places.websiteUri,places.currentOpeningHours.weekdayDescriptions,places.priceLevel,places.types,places.location"
+        "X-Goog-FieldMask": field_mask  # This ensures we only get required fields
     }
 
-    for index, query in enumerate(search_queries):
-        payload = {"textQuery": query}
-        response = requests.post(url, json=payload, headers=headers).json()
+    # Send request to Google Places API
+    response = requests.post(GOOGLE_PLACES_URL, json=payload, headers=headers)
 
-        # Log errors if API request fails
-        if "error" in response:
-            print(f"API Error: {response['error']}")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail=response.json())
 
-        for place in response.get("places", []):
-            results.append([
-                place.get("displayName", {}).get("text", ""),
-                place.get("formattedAddress", ""),
-                place.get("rating", ""),
-                place.get("userRatingCount", ""),
-                place.get("internationalPhoneNumber", ""),
-                place.get("websiteUri", ""),
-                ", ".join(place.get("currentOpeningHours", {}).get("weekdayDescriptions", [])),  
-                place.get("priceLevel", ""),
-                ", ".join(place.get("types", [])),  
-                place.get("location", {}).get("latitude", ""),
-                place.get("location", {}).get("longitude", "")
-            ])
+    data = response.json()
 
-        # Update progress percentage
-        scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
+    # Extract results
+    places = data.get("places", [])
 
-    # Ensure CSV is created even if no results
-    csv_filename = "scraped_results.csv"
-    with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
+    # Write results to CSV
+    with open(TEMP_CSV_FILE.name, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        writer.writerow(["Name", "Address", "Rating", "Total Reviews", "Phone", "Website", "Opening Hours", "Price Level", "Types", "Latitude", "Longitude"])
-        writer.writerows(results)
 
-    print(f"CSV saved: {csv_filename}")
-    scrape_progress["progress"] = 100  # Mark as complete
-    return csv_filename
+        # Write headers
+        writer.writerow(selected_fields_list)
 
-# API Endpoint to Start Scraping
-@app.post("/start_scraping/")
-async def start_scraping(data: dict, background_tasks: BackgroundTasks):
-    global scrape_progress
-    search_queries = data.get("queries", [])
-    
-    # Reset progress
-    scrape_progress["progress"] = 0
-    
-    background_tasks.add_task(scrape_google_maps, search_queries)
-    return {"message": "Scraping started. You will be able to download the results when complete."}
+        # Write data
+        for place in places:
+            row = [place.get(field, "") for field in selected_fields_list]
+            writer.writerow(row)
 
-# API Endpoint to Check Scraping Progress
-@app.get("/progress/")
-async def get_progress():
-    return scrape_progress
+    return {"message": "Scraping complete! Download your CSV file.", "csv_url": "/download_csv"}
 
-# API Endpoint to Serve the CSV File
 @app.get("/download_csv/")
 async def download_csv():
-    if os.path.exists("scraped_results.csv"):
-        return FileResponse("scraped_results.csv", media_type="text/csv", filename="scraped_results.csv")
-    else:
-        return {"error": "No CSV file found. Please start a new scrape first."}
+    """
+    Serve the generated CSV file for download.
+    """
+    return FileResponse(TEMP_CSV_FILE.name, filename="scraped_data.csv", media_type="text/csv")
