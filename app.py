@@ -24,7 +24,12 @@ def scrape_google_maps(search_queries, selected_fields):
     results = []
     url = "https://places.googleapis.com/v1/places:searchText"
     
-    # If no fields are selected, pull all fields by default
+    # Ensure selected_fields is a valid list and remove None values
+    if not selected_fields or not isinstance(selected_fields, list):
+        selected_fields = []
+    selected_fields = [field for field in selected_fields if field]  # Remove None values
+
+    # If no fields are selected, use default fields
     if not selected_fields:
         selected_fields = [
             "places.displayName.text", "places.formattedAddress", "places.rating", 
@@ -43,7 +48,7 @@ def scrape_google_maps(search_queries, selected_fields):
             "places.icon", "places.icon_mask_base_uri", "places.icon_background_color", "places.url", "places.plus_code", 
             "places.adr_address", "places.address_component"
         ]
-    
+
     # Convert selected fields into the API request format
     fields_string = ",".join(selected_fields)
 
@@ -86,8 +91,15 @@ def scrape_google_maps(search_queries, selected_fields):
 async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     search_queries = data.get("queries", [])
     selected_fields = data.get("fields", [])  # Get selected fields from request
+    
     if not search_queries:
         raise HTTPException(status_code=400, detail="No search queries provided.")
+
+    # Ensure selected_fields is a list and contains valid values
+    if not isinstance(selected_fields, list):
+        selected_fields = []
+    selected_fields = [field for field in selected_fields if field]  # Remove None values
+
     background_tasks.add_task(scrape_google_maps, search_queries, selected_fields)
     return {"message": "Scraping started. You will be able to download the results when complete."}
 
