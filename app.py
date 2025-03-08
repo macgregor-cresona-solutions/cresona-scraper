@@ -23,6 +23,27 @@ GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 # Store scraping status
 scraping_status = {"progress": 0, "status": "idle"}
 
+# List of valid fields (to prevent errors)
+VALID_FIELDS = {
+    "places.displayName.text", "places.formattedAddress", "places.rating",
+    "places.userRatingCount", "places.internationalPhoneNumber", "places.websiteUri",
+    "places.currentOpeningHours.weekdayDescriptions", "places.priceLevel", "places.types",
+    "places.editorialSummary", "places.paymentOptions", "places.parkingOptions",
+    "places.delivery", "places.takeout", "places.dineIn", "places.reservable",
+    "places.servesBreakfast", "places.servesBrunch", "places.servesLunch",
+    "places.servesDinner", "places.servesDessert", "places.servesCocktails",
+    "places.servesCoffee", "places.servesBeer", "places.servesWine",
+    "places.servesVegetarianFood", "places.goodForChildren", "places.goodForGroups",
+    "places.goodForWatchingSports", "places.outdoorSeating", "places.liveMusic",
+    "places.menuForChildren", "places.allowsDogs", "places.restroom",
+    "places.wheelchairAccessibleParking", "places.wheelchairAccessibleRestroom",
+    "places.wheelchairAccessibleSeating", "places.fuelOptions", "places.evChargeOptions",
+    "places.subDestinations", "places.primaryType", "places.primaryTypeDisplayName",
+    "places.type", "places.shortFormattedAddress", "places.vicinity", "places.icon",
+    "places.icon_mask_base_uri", "places.icon_background_color", "places.url",
+    "places.plus_code", "places.adr_address", "places.address_component"
+}
+
 # Function to scrape Google Maps data with selected fields
 def scrape_google_maps(search_queries, selected_fields):
     global scraping_status
@@ -32,45 +53,20 @@ def scrape_google_maps(search_queries, selected_fields):
     results = []
     url = "https://places.googleapis.com/v1/places:searchText"
 
-    # Ensure selected_fields is valid and remove None values
-    if not selected_fields or not isinstance(selected_fields, list):
-        selected_fields = []
-    selected_fields = [field for field in selected_fields if field]  # Remove None values
+    # Ensure selected_fields contains only valid values
+    selected_fields = set(selected_fields).intersection(VALID_FIELDS)  # Keep only valid fields
 
-    # If no fields are selected, use a default valid list
+    # If no fields are selected, use all valid fields
     if not selected_fields:
-        selected_fields = [
-            "places.displayName.text", "places.formattedAddress", "places.rating",
-            "places.userRatingCount", "places.internationalPhoneNumber", "places.websiteUri",
-            "places.currentOpeningHours.weekdayDescriptions", "places.priceLevel", "places.types",
-            "places.editorialSummary", "places.paymentOptions", "places.parkingOptions",
-            "places.delivery", "places.takeout", "places.dineIn", "places.reservable",
-            "places.servesBreakfast", "places.servesBrunch", "places.servesLunch",
-            "places.servesDinner", "places.servesDessert", "places.servesCocktails",
-            "places.servesCoffee", "places.servesBeer", "places.servesWine",
-            "places.servesVegetarianFood", "places.goodForChildren", "places.goodForGroups",
-            "places.goodForWatchingSports", "places.outdoorSeating", "places.liveMusic",
-            "places.menuForChildren", "places.allowsDogs", "places.restroom",
-            "places.wheelchairAccessibleEntrance", "places.wheelchairAccessibleParking",
-            "places.wheelchairAccessibleRestroom", "places.wheelchairAccessibleSeating",
-            "places.fuelOptions", "places.evChargeOptions", "places.subDestinations",
-            "places.primaryType", "places.primaryTypeDisplayName", "places.type",
-            "places.shortFormattedAddress", "places.vicinity", "places.icon",
-            "places.icon_mask_base_uri", "places.icon_background_color", "places.url",
-            "places.plus_code", "places.adr_address", "places.address_component"
-        ]
+        selected_fields = VALID_FIELDS
 
-    # **REMOVE Invalid Fields**
-    invalid_fields = {"places.geometry"}  # Remove any problematic fields
-    selected_fields = [field for field in selected_fields if field not in invalid_fields]
-
-    # Convert selected fields into the API request format
+    # Convert fields to API format
     fields_string = ",".join(selected_fields)
 
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-        "X-Goog-FieldMask": fields_string  # Dynamically include only selected fields
+        "X-Goog-FieldMask": fields_string
     }
 
     total_queries = len(search_queries)
@@ -80,28 +76,29 @@ def scrape_google_maps(search_queries, selected_fields):
 
         if "error" in response:
             print(f"API Error: {response['error']}")
+            continue
 
         for place in response.get("places", []):
-            result_row = []
+            result_row = {field: "" for field in selected_fields}  # Ensure correct column order
             for field in selected_fields:
-                field_path = field.replace("places.", "").split(".")  # Remove 'places.' prefix
+                field_path = field.replace("places.", "").split(".")  # Normalize field names
                 value = place
                 for path in field_path:
                     value = value.get(path, "") if isinstance(value, dict) else ""
-                result_row.append(value)
+                result_row[field] = value
             results.append(result_row)
 
         # Update progress
         scraping_status["progress"] = int(((idx + 1) / total_queries) * 100)
 
-        # Simulate delay for large batch processing (optional)
+        # Prevent API rate limiting (optional)
         time.sleep(0.5)
 
     # Save results to CSV
     csv_filename = "scraped_results.csv"
     with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(selected_fields)
+        writer = csv.DictWriter(file, fieldnames=selected_fields)
+        writer.writeheader()
         writer.writerows(results)
 
     print(f"CSV saved: {csv_filename}")
@@ -112,15 +109,13 @@ def scrape_google_maps(search_queries, selected_fields):
 @app.post("/start_scraping/")
 async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     search_queries = data.get("queries", [])
-    selected_fields = data.get("fields", [])  # Get selected fields from request
+    selected_fields = data.get("fields", [])
 
     if not search_queries:
         raise HTTPException(status_code=400, detail="No search queries provided.")
 
-    # Ensure selected_fields is a list and contains valid values
-    if not isinstance(selected_fields, list):
-        selected_fields = []
-    selected_fields = [field for field in selected_fields if field and field not in {"places.geometry"}]  # Remove invalid fields
+    # Validate selected fields
+    selected_fields = list(set(selected_fields).intersection(VALID_FIELDS))
 
     # Start background scraping
     background_tasks.add_task(scrape_google_maps, search_queries, selected_fields)
