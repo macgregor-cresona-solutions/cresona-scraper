@@ -1,94 +1,129 @@
-import os
-import json
-import csv
+from fastapi import FastAPI, BackgroundTasks, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import requests
-from flask import Flask, request, jsonify, send_file
+import csv
+import os
+from dotenv import load_dotenv
 
-app = Flask(__name__)
 
-# Set your Google API Key
-GOOGLE_PLACES_API_KEY = "YOUR_GOOGLE_API_KEY"
+# Load environment variables
+load_dotenv()
 
-# Store progress in memory (for simplicity)
-scraping_progress = {"progress": 0}
 
-@app.route('/start_scraping/', methods=['POST'])
-def start_scraping():
-    try:
-        data = request.json
-        search_queries = data.get("queries", [])
-        selected_fields = data.get("fields", "").split(",")
-        list_name = data.get("list_name", "output")
+# Fetch API Key securely
+GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
-        if not search_queries or not selected_fields:
-            return jsonify({"error": "Missing search queries or selected fields"}), 400
 
-        results = []
+app = FastAPI()
 
-        for index, query in enumerate(search_queries):
-            print(f"🔍 Searching: {query}")
 
-            # Construct API Request
-            url = "https://places.googleapis.com/v1/places:searchText"
-            params = {
-                "textQuery": query,
-                "fields": ",".join(selected_fields),
-                "key": GOOGLE_PLACES_API_KEY
-            }
+# Enable CORS for Webflow
+app.add_middleware(
+   CORSMiddleware,
+   allow_origins=["*"],  # Replace with specific domains for security
+   allow_credentials=True,
+   allow_methods=["*"], 
+   allow_headers=["*"], 
+)
 
-            print(f"📤 API Request: {url}")
-            print(f"📤 Parameters: {json.dumps(params, indent=2)}")
 
-            response = requests.post(url, headers={"Content-Type": "application/json"}, json=params)
+# Global variable to track progress
+scrape_progress = {"progress": 0}
 
-            print(f"🔄 Raw API Response: {response.text}")  # Log full response
 
-            if response.status_code != 200:
-                print(f"❌ API Error: {response.status_code} - {response.text}")
-                continue
+# Function to scrape Google Maps data with progress tracking
+def scrape_google_maps(search_queries, list_name):
+   global scrape_progress
+   results = []
+   total_queries = len(search_queries)
+  
+   url = "https://places.googleapis.com/v1/places:searchText"
+   headers = {
+       "Content-Type": "application/json",
+       "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+       "X-Goog-FieldMask": "places.displayName.text,places.formattedAddress,places.rating,places.userRatingCount,places.internationalPhoneNumber,places.websiteUri,places.currentOpeningHours.weekdayDescriptions,places.priceLevel,places.types,places.location"
+   }
 
-            data = response.json()
 
-            if "places" not in data:
-                print("⚠️ No 'places' key in API response")
-                continue
+   for index, query in enumerate(search_queries):
+       payload = {"textQuery": query}
+       response = requests.post(url, json=payload, headers=headers).json()
 
-            for place in data["places"]:
-                row = {field: place.get(field, "N/A") for field in selected_fields}
-                results.append(row)
 
-            # Update progress
-            scraping_progress["progress"] = int(((index + 1) / len(search_queries)) * 100)
+       # Log errors if API request fails
+       if "error" in response:
+           print(f"API Error: {response['error']}")
 
-        # Save results to CSV
-        csv_file = f"{list_name}.csv"
-        csv_path = os.path.join(os.getcwd(), csv_file)
 
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=selected_fields)
-            writer.writeheader()
-            writer.writerows(results)
+       for place in response.get("places", []):
+           results.append([
+               place.get("displayName", {}).get("text", ""),
+               place.get("formattedAddress", ""),
+               place.get("rating", ""),
+               place.get("userRatingCount", ""),
+               place.get("internationalPhoneNumber", ""),
+               place.get("websiteUri", ""),
+               ", ".join(place.get("currentOpeningHours", {}).get("weekdayDescriptions", [])), 
+               place.get("priceLevel", ""),
+               ", ".join(place.get("types", [])), 
+               place.get("location", {}).get("latitude", ""),
+               place.get("location", {}).get("longitude", "")
+           ])
 
-        return jsonify({"message": "Scraping completed", "file": csv_file})
 
-    except Exception as e:
-        print(f"❌ Unexpected Error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+       # Update progress percentage
+       scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
-@app.route('/progress/', methods=['GET'])
-def get_progress():
-    return jsonify({"progress": scraping_progress["progress"]})
 
-@app.route('/download_csv/', methods=['GET'])
-def download_csv():
-    list_name = request.args.get("list_name", "output")
-    csv_file = f"{list_name}.csv"
-    csv_path = os.path.join(os.getcwd(), csv_file)
+   # Ensure CSV filename is based on user input
+   safe_list_name = list_name.replace(" ", "_").replace("/", "_")  # Prevent issues with spaces or slashes
+   csv_filename = f"{safe_list_name}.csv"
 
-    if not os.path.exists(csv_path):
-        return jsonify({"error": "CSV file not found"}), 404
 
-    return send_file(csv_path, as_attachment=True)
+   with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
+       writer = csv.writer(file)
+       writer.writerow(["Name", "Address", "Rating", "Total Reviews", "Phone", "Website", "Opening Hours", "Price Level", "Types", "Latitude", "Longitude"])
+       writer.writerows(results)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+
+   print(f"CSV saved: {csv_filename}")
+   scrape_progress["progress"] = 100  # Mark as complete
+   return csv_filename
+
+
+# API Endpoint to Start Scraping
+@app.post("/start_scraping/")
+async def start_scraping(data: dict, background_tasks: BackgroundTasks):
+   global scrape_progress
+   search_queries = data.get("queries", [])
+   list_name = data.get("list_name", "scraped_results")  # Default to 'scraped_results' if no name is provided
+  
+   scrape_progress["progress"] = 0  # Reset progress
+
+
+   background_tasks.add_task(scrape_google_maps, search_queries, list_name)
+   return {"message": "Scraping started. You will be able to download the results when complete."}
+
+
+# API Endpoint to Check Scraping Progress
+@app.get("/progress/")
+async def get_progress():
+   return scrape_progress
+
+
+# API Endpoint to Serve the CSV File
+@app.get("/download_csv/")
+async def download_csv(list_name: str = Query("scraped_results", title="List Name")):
+   """ Serve the requested CSV file """
+   safe_list_name = list_name.replace(" ", "_").replace("/", "_")  # Sanitize filename
+   csv_filename = f"{safe_list_name}.csv"
+
+
+   if os.path.exists(csv_filename):
+       return FileResponse(csv_filename, media_type="text/csv", filename=csv_filename)
+   else:
+       return {"error": f"No CSV file found with name '{csv_filename}'. Please start a new scrape first."}
+
+
+
