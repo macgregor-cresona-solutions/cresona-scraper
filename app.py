@@ -15,13 +15,13 @@ app = FastAPI()
 # Enable CORS for Webflow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with specific domains for security
+    allow_origins=["*"],  # Replace "*" with Webflow domain for security
     allow_credentials=True,
     allow_methods=["*"],  
     allow_headers=["*"],  
 )
 
-# Global variable to track progress
+# Track scraping progress globally
 scrape_progress = {"progress": 0}
 
 # Function to scrape Google Places data based on user-selected fields
@@ -37,13 +37,32 @@ def scrape_google_maps(search_queries, list_name, fields):
     total_queries = len(search_queries)
 
     for index, query in enumerate(search_queries):
-        response = requests.post(url, json={"textQuery": query}, headers=headers).json()
+        payload = {"textQuery": query}
+        response = requests.post(url, json=payload, headers=headers).json()
+
+        # Debugging: Print API response
+        print(f"🔍 API Response for '{query}':", response)
+
+        if "error" in response:
+            print(f"❌ API Error: {response['error']}")
+            continue
 
         for place in response.get("places", []):
-            row = [place.get(field, "") for field in fields.split(",")]
+            row = []
+            for field in fields.split(","):
+                field_parts = field.split(".")  # Handle nested values
+                value = place
+                for part in field_parts:
+                    value = value.get(part, "") if isinstance(value, dict) else ""
+                row.append(value)
             results.append(row)
 
+        # Update progress
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
+
+    # Check if results are empty before saving
+    if not results:
+        print("⚠️ No data found for search queries. CSV will be empty.")
 
     # Save CSV file
     safe_list_name = list_name.replace(" ", "_")
