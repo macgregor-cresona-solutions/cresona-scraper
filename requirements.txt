@@ -80,8 +80,6 @@ Pygments==2.19.1
 PyJWT==2.10.1
 PyMsgBox==1.0.9
 pynput==1.7.7
-pyobjc==11.0
-pyobjc-core==11.0
 pyobjc-framework-Accessibility==11.0
 pyobjc-framework-Accounts==11.0
 pyobjc-framework-AddressBook==11.0
