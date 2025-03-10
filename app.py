@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
@@ -6,7 +6,7 @@ import csv
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
 # Fetch API Key securely
@@ -14,10 +14,10 @@ GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
 app = FastAPI()
 
-# Enable CORS to allow Webflow requests
+# Enable CORS for Webflow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with your Webflow URL later for security
+    allow_origins=["*"],  # Replace with specific domains for security
     allow_credentials=True,
     allow_methods=["*"],  
     allow_headers=["*"],  
@@ -27,7 +27,7 @@ app.add_middleware(
 scrape_progress = {"progress": 0}
 
 # Function to scrape Google Maps data with progress tracking
-def scrape_google_maps(search_queries):
+def scrape_google_maps(search_queries, list_name):
     global scrape_progress
     results = []
     total_queries = len(search_queries)
@@ -65,8 +65,10 @@ def scrape_google_maps(search_queries):
         # Update progress percentage
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
-    # Ensure CSV is created even if no results
-    csv_filename = "scraped_results.csv"
+    # Ensure CSV filename is based on user input
+    safe_list_name = list_name.replace(" ", "_").replace("/", "_")  # Prevent issues with spaces or slashes
+    csv_filename = f"{safe_list_name}.csv"
+
     with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(["Name", "Address", "Rating", "Total Reviews", "Phone", "Website", "Opening Hours", "Price Level", "Types", "Latitude", "Longitude"])
@@ -81,11 +83,11 @@ def scrape_google_maps(search_queries):
 async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     global scrape_progress
     search_queries = data.get("queries", [])
+    list_name = data.get("list_name", "scraped_results")  # Default to 'scraped_results' if no name is provided
     
-    # Reset progress
-    scrape_progress["progress"] = 0
-    
-    background_tasks.add_task(scrape_google_maps, search_queries)
+    scrape_progress["progress"] = 0  # Reset progress
+
+    background_tasks.add_task(scrape_google_maps, search_queries, list_name)
     return {"message": "Scraping started. You will be able to download the results when complete."}
 
 # API Endpoint to Check Scraping Progress
@@ -95,8 +97,12 @@ async def get_progress():
 
 # API Endpoint to Serve the CSV File
 @app.get("/download_csv/")
-async def download_csv():
-    if os.path.exists("scraped_results.csv"):
-        return FileResponse("scraped_results.csv", media_type="text/csv", filename="scraped_results.csv")
+async def download_csv(list_name: str = Query("scraped_results", title="List Name")):
+    """ Serve the requested CSV file """
+    safe_list_name = list_name.replace(" ", "_").replace("/", "_")  # Sanitize filename
+    csv_filename = f"{safe_list_name}.csv"
+
+    if os.path.exists(csv_filename):
+        return FileResponse(csv_filename, media_type="text/csv", filename=csv_filename)
     else:
-        return {"error": "No CSV file found. Please start a new scrape first."}
+        return {"error": f"No CSV file found with name '{csv_filename}'. Please start a new scrape first."}
