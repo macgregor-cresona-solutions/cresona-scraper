@@ -11,68 +11,64 @@ app = FastAPI()
 # Enable CORS for Webflow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with specific domain for security
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global variable to track progress
 scrape_progress = {"progress": 0}
 
-# Function to scrape Google Maps data with user-provided API key
-def scrape_google_maps(search_queries, list_name, user_api_key):
+def scrape_google_places_textsearch(search_queries, list_name, user_api_key):
     global scrape_progress
     results = []
     total_queries = len(search_queries)
 
-    url = "https://places.googleapis.com/v1/places:searchText"
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": user_api_key,  # Use the user's API key
-        "X-Goog-FieldMask": "places.displayName.text,places.formattedAddress,places.rating,places.userRatingCount,places.internationalPhoneNumber,places.websiteUri,places.currentOpeningHours.weekdayDescriptions,places.priceLevel,places.types,places.location"
-    }
+    base_url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
     for index, query in enumerate(search_queries):
-        payload = {"textQuery": query}
-        all_places = []
+        params = {
+            "query": query,
+            "key": user_api_key
+        }
 
+        pages_scraped = 0
         while True:
-            response = requests.post(url, json=payload, headers=headers).json()
+            response = requests.get(base_url, params=params).json()
 
-            # Log errors if API request fails
-            if "error" in response:
-                print(f"API Error: {response['error']}")
+            if "error_message" in response:
+                print(f"API Error: {response['error_message']}")
                 break
 
-            all_places.extend(response.get("places", []))
+            for place in response.get("results", []):
+                results.append([
+                    place.get("name", ""),
+                    place.get("formatted_address", ""),
+                    place.get("rating", ""),
+                    place.get("user_ratings_total", ""),
+                    place.get("formatted_phone_number", ""),
+                    place.get("website", ""),
+                    "",  # opening hours not provided in textsearch
+                    "",  # price level
+                    ", ".join(place.get("types", [])),
+                    place.get("geometry", {}).get("location", {}).get("lat", ""),
+                    place.get("geometry", {}).get("location", {}).get("lng", "")
+                ])
 
-            next_page_token = response.get("nextPageToken")
-            if next_page_token:
-                time.sleep(2)  # Delay to allow nextPageToken to become active
-                payload["pageToken"] = next_page_token
+            pages_scraped += 1
+            next_page_token = response.get("next_page_token")
+
+            if next_page_token and pages_scraped < 3:
+                time.sleep(2)  # Wait before next page becomes available
+                params = {
+                    "pagetoken": next_page_token,
+                    "key": user_api_key
+                }
             else:
                 break
 
-        for place in all_places:
-            results.append([
-                place.get("displayName", {}).get("text", ""),
-                place.get("formattedAddress", ""),
-                place.get("rating", ""),
-                place.get("userRatingCount", ""),
-                place.get("internationalPhoneNumber", ""),
-                place.get("websiteUri", ""),
-                ", ".join(place.get("currentOpeningHours", {}).get("weekdayDescriptions", [])),
-                place.get("priceLevel", ""),
-                ", ".join(place.get("types", [])),
-                place.get("location", {}).get("latitude", ""),
-                place.get("location", {}).get("longitude", "")
-            ])
-
-        # Update progress percentage
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
-    # Ensure CSV filename is based on user input
     safe_list_name = list_name.replace(" ", "_").replace("/", "_")
     csv_filename = f"{safe_list_name}.csv"
 
@@ -85,10 +81,9 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
         writer.writerows(results)
 
     print(f"✅ CSV saved: {csv_filename}")
-    scrape_progress["progress"] = 100  # Mark as complete
+    scrape_progress["progress"] = 100
     return csv_filename
 
-# API Endpoint to Start Scraping
 @app.post("/start_scraping/")
 async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     global scrape_progress
@@ -100,15 +95,13 @@ async def start_scraping(data: dict, background_tasks: BackgroundTasks):
         return {"error": "Missing user API key."}
 
     scrape_progress["progress"] = 0
-    background_tasks.add_task(scrape_google_maps, search_queries, list_name, user_api_key)
+    background_tasks.add_task(scrape_google_places_textsearch, search_queries, list_name, user_api_key)
     return {"message": "Scraping started. You will be able to download the results when complete."}
 
-# API Endpoint to Check Scraping Progress
 @app.get("/progress/")
 async def get_progress():
     return scrape_progress
 
-# API Endpoint to Serve the CSV File
 @app.get("/download_csv/")
 async def download_csv(list_name: str = Query("scraped_results", title="List Name")):
     safe_list_name = list_name.replace(" ", "_").replace("/", "_")
