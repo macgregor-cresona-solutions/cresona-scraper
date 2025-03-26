@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 import requests
 import csv
 import os
+import time
 
 app = FastAPI()
 
@@ -34,13 +35,26 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
 
     for index, query in enumerate(search_queries):
         payload = {"textQuery": query}
-        response = requests.post(url, json=payload, headers=headers).json()
+        all_places = []
 
-        # Log errors if API request fails
-        if "error" in response:
-            print(f"API Error: {response['error']}")
+        while True:
+            response = requests.post(url, json=payload, headers=headers).json()
 
-        for place in response.get("places", []):
+            # Log errors if API request fails
+            if "error" in response:
+                print(f"API Error: {response['error']}")
+                break
+
+            all_places.extend(response.get("places", []))
+
+            next_page_token = response.get("nextPageToken")
+            if next_page_token:
+                time.sleep(2)  # Delay to allow nextPageToken to become active
+                payload["pageToken"] = next_page_token
+            else:
+                break
+
+        for place in all_places:
             results.append([
                 place.get("displayName", {}).get("text", ""),
                 place.get("formattedAddress", ""),
