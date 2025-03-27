@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-scrape_progress = {"progress": 0}
+scrape_progress = {"progress": 0, "error": None}
 
 # Scraping function
 def scrape_google_maps(search_queries, list_name, user_api_key):
@@ -47,8 +47,10 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
             response = requests.post(search_url, json=payload, headers=headers).json()
 
             if "error" in response:
-                print(f"API Error (searchText): {response['error']}")
-                break
+                scrape_progress["progress"] = -1  # 🚨 Indicate failure
+                scrape_progress["error"] = response["error"].get("message", "Unknown API error")
+                print(f"❌ API Error (searchText): {scrape_progress['error']}")
+                return
 
             place_ids = [place["id"] for place in response.get("places", [])]
             all_place_ids.extend(place_ids)
@@ -65,8 +67,10 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
             detail_response = requests.get(detail_url).json()
 
             if "error" in detail_response:
-                print(f"API Error (getPlace): {detail_response['error']}")
-                continue
+                scrape_progress["progress"] = -1  # 🚨 Indicate failure
+                scrape_progress["error"] = detail_response["error"].get("message", "Unknown API error")
+                print(f"❌ API Error (getPlace): {scrape_progress['error']}")
+                return
 
             results.append([
                 detail_response.get("displayName", {}).get("text", ""),
@@ -111,7 +115,7 @@ async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     if not user_api_key:
         return {"error": "Missing user API key."}
 
-    scrape_progress["progress"] = 0
+    scrape_progress = {"progress": 0, "error": None}
     background_tasks.add_task(scrape_google_maps, search_queries, list_name, user_api_key)
     return {"message": "Scraping started. You will be able to download the results when complete."}
 
