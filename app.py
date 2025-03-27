@@ -1,17 +1,16 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
+from fastapi import FastAPI, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
 import csv
 import os
-import asyncio
 
 app = FastAPI()
 
 # Enable CORS for Webflow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can replace "*" with specific domains for better security
+    allow_origins=["*"],  # Replace with your domain for better security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,7 +19,7 @@ app.add_middleware(
 scrape_progress = {"progress": 0}
 
 # Scraping function
-async def scrape_google_maps(search_queries, list_name, user_api_key):
+def scrape_google_maps(search_queries, list_name, user_api_key):
     global scrape_progress
     results = []
     total_queries = len(search_queries)
@@ -48,8 +47,9 @@ async def scrape_google_maps(search_queries, list_name, user_api_key):
             response = requests.post(search_url, json=payload, headers=headers).json()
 
             if "error" in response:
-                raise HTTPException(status_code=400, detail=f"API Error (searchText): {response['error']}")
-            
+                print(f"API Error (searchText): {response['error']}")
+                return {"error": f"API Error: {response['error']['message']}"}
+
             place_ids = [place["id"] for place in response.get("places", [])]
             all_place_ids.extend(place_ids)
 
@@ -65,7 +65,8 @@ async def scrape_google_maps(search_queries, list_name, user_api_key):
             detail_response = requests.get(detail_url).json()
 
             if "error" in detail_response:
-                raise HTTPException(status_code=400, detail=f"API Error (getPlace): {detail_response['error']}")
+                print(f"API Error (getPlace): {detail_response['error']}")
+                continue
 
             results.append([ 
                 detail_response.get("displayName", {}).get("text", ""),
@@ -81,7 +82,6 @@ async def scrape_google_maps(search_queries, list_name, user_api_key):
                 detail_response.get("location", {}).get("longitude", "")
             ])
 
-        # Update progress
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
     # Save results to CSV
@@ -90,13 +90,14 @@ async def scrape_google_maps(search_queries, list_name, user_api_key):
 
     with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        writer.writerow([
+        writer.writerow([ 
             "Name", "Address", "Rating", "Total Reviews", "Phone", "Website",
             "Opening Hours", "Price Level", "Types", "Latitude", "Longitude"
         ])
         writer.writerows(results)
 
-    scrape_progress["progress"] = 100  # Set progress to 100% once done
+    print(f"✅ CSV saved: {csv_filename}")
+    scrape_progress["progress"] = 100
     return csv_filename
 
 # Start scraping endpoint
@@ -108,9 +109,8 @@ async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     user_api_key = data.get("user_api_key", "")
 
     if not user_api_key:
-        raise HTTPException(status_code=400, detail="Missing user API key.")
+        return {"error": "Missing user API key."}
 
-    # Reset progress before starting
     scrape_progress["progress"] = 0
     background_tasks.add_task(scrape_google_maps, search_queries, list_name, user_api_key)
     return {"message": "Scraping started. You will be able to download the results when complete."}
@@ -129,12 +129,4 @@ async def download_csv(list_name: str = Query("scraped_results", title="List Nam
     if os.path.exists(csv_filename):
         return FileResponse(csv_filename, media_type="text/csv", filename=csv_filename)
     else:
-        raise HTTPException(status_code=404, detail=f"No CSV file found with name '{csv_filename}'. Please start a new scrape first.")
-
-# Optional: If you want to handle errors globally, you can set up exception handling
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"message": exc.detail}
-    )
+        return {"error": f"No CSV file found with name '{csv_filename}'. Please start a new scrape first."}
