@@ -85,8 +85,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
     # Save results to CSV
-    safe_list_name = list_name.replace(" ", "_").replace("/", "_")
-    csv_filename = f"{safe_list_name}.csv"
+    csv_filename = f"{list_name}.csv"  # Using the exact list name without modification
 
     with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
@@ -123,8 +122,7 @@ async def get_progress():
 # Download CSV endpoint
 @app.get("/download_csv/")
 async def download_csv(list_name: str = Query("scraped_results", title="List Name")):
-    safe_list_name = list_name.replace(" ", "_").replace("/", "_")
-    csv_filename = f"{safe_list_name}.csv"
+    csv_filename = f"{list_name}.csv"  # Keep the original name, no replacement of spaces
 
     if os.path.exists(csv_filename):
         return FileResponse(csv_filename, media_type="text/csv", filename=csv_filename)
