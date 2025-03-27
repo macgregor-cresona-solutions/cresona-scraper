@@ -1,25 +1,26 @@
-from fastapi import FastAPI, BackgroundTasks, Query
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
 import csv
 import os
+import asyncio
 
 app = FastAPI()
 
 # Enable CORS for Webflow
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your domain for better security
+    allow_origins=["*"],  # You can replace "*" with specific domains for better security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-scrape_progress = {"progress": 0, "error": None}
+scrape_progress = {"progress": 0}
 
 # Scraping function
-def scrape_google_maps(search_queries, list_name, user_api_key):
+async def scrape_google_maps(search_queries, list_name, user_api_key):
     global scrape_progress
     results = []
     total_queries = len(search_queries)
@@ -47,11 +48,8 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
             response = requests.post(search_url, json=payload, headers=headers).json()
 
             if "error" in response:
-                scrape_progress["progress"] = -1  # 🚨 Indicate failure
-                scrape_progress["error"] = response["error"].get("message", "Unknown API error")
-                print(f"❌ API Error (searchText): {scrape_progress['error']}")
-                return
-
+                raise HTTPException(status_code=400, detail=f"API Error (searchText): {response['error']}")
+            
             place_ids = [place["id"] for place in response.get("places", [])]
             all_place_ids.extend(place_ids)
 
@@ -67,12 +65,9 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
             detail_response = requests.get(detail_url).json()
 
             if "error" in detail_response:
-                scrape_progress["progress"] = -1  # 🚨 Indicate failure
-                scrape_progress["error"] = detail_response["error"].get("message", "Unknown API error")
-                print(f"❌ API Error (getPlace): {scrape_progress['error']}")
-                return
+                raise HTTPException(status_code=400, detail=f"API Error (getPlace): {detail_response['error']}")
 
-            results.append([
+            results.append([ 
                 detail_response.get("displayName", {}).get("text", ""),
                 detail_response.get("formattedAddress", ""),
                 detail_response.get("rating", ""),
@@ -86,6 +81,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
                 detail_response.get("location", {}).get("longitude", "")
             ])
 
+        # Update progress
         scrape_progress["progress"] = int(((index + 1) / total_queries) * 100)
 
     # Save results to CSV
@@ -100,8 +96,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
         ])
         writer.writerows(results)
 
-    print(f"✅ CSV saved: {csv_filename}")
-    scrape_progress["progress"] = 100
+    scrape_progress["progress"] = 100  # Set progress to 100% once done
     return csv_filename
 
 # Start scraping endpoint
@@ -113,9 +108,10 @@ async def start_scraping(data: dict, background_tasks: BackgroundTasks):
     user_api_key = data.get("user_api_key", "")
 
     if not user_api_key:
-        return {"error": "Missing user API key."}
+        raise HTTPException(status_code=400, detail="Missing user API key.")
 
-    scrape_progress = {"progress": 0, "error": None}
+    # Reset progress before starting
+    scrape_progress["progress"] = 0
     background_tasks.add_task(scrape_google_maps, search_queries, list_name, user_api_key)
     return {"message": "Scraping started. You will be able to download the results when complete."}
 
@@ -133,4 +129,12 @@ async def download_csv(list_name: str = Query("scraped_results", title="List Nam
     if os.path.exists(csv_filename):
         return FileResponse(csv_filename, media_type="text/csv", filename=csv_filename)
     else:
-        return {"error": f"No CSV file found with name '{csv_filename}'. Please start a new scrape first."}
+        raise HTTPException(status_code=404, detail=f"No CSV file found with name '{csv_filename}'. Please start a new scrape first.")
+
+# Optional: If you want to handle errors globally, you can set up exception handling
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"message": exc.detail}
+    )
