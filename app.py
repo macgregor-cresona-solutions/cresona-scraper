@@ -48,7 +48,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
 
             if "error" in response:
                 print(f"API Error (searchText): {response['error']}")
-                return {"error": f"API Error: {response['error']['message']}"}
+                break
 
             place_ids = [place["id"] for place in response.get("places", [])]
             all_place_ids.extend(place_ids)
@@ -68,7 +68,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
                 print(f"API Error (getPlace): {detail_response['error']}")
                 continue
 
-            results.append([ 
+            results.append([
                 detail_response.get("displayName", {}).get("text", ""),
                 detail_response.get("formattedAddress", ""),
                 detail_response.get("rating", ""),
@@ -90,7 +90,7 @@ def scrape_google_maps(search_queries, list_name, user_api_key):
 
     with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        writer.writerow([ 
+        writer.writerow([
             "Name", "Address", "Rating", "Total Reviews", "Phone", "Website",
             "Opening Hours", "Price Level", "Types", "Latitude", "Longitude"
         ])
